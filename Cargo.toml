@@ -1,0 +1,25 @@
+[package]
+name = "bitset"
+version = "0.1.0"
+authors = ["Ben Kimock <kimockb@gmail.com>"]
+categories = ["data-structures"]
+description = "Small-size-optimized bitset"
+documentation = ""
+edition = "2021"
+exclude = []
+keywords = ["bitset"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/saethlin/bitset"
+
+[dev-dependencies]
+criterion = "0.4"
+
+[[bench]]
+name = "bench"
+harness = false
+
+[profile.release]
+debug = 1
+
+[profile.bench]
+debug = 1
