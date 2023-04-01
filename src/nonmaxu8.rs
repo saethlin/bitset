@@ -13,7 +13,7 @@ impl Debug for NonMaxU8 {
 
 impl NonMaxU8 {
     const MAX: Self = NonMaxU8 {
-        repr: NonMaxU8Repr::_248
+        repr: NonMaxU8Repr::_248,
     };
 
     #[inline]
@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     fn niche_rejected() {
-        for i in NonMaxU8::MAX.get()+1..=u8::MAX {
+        for i in NonMaxU8::MAX.get() + 1..=u8::MAX {
             assert_eq!(NonMaxU8::new(i), None);
         }
     }

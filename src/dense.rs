@@ -1,9 +1,11 @@
-//! A small BitSet which never allocates and can store 248 bits.
+//! The inline representation of a small-size-optimized bitset.
 //!
-//!
+//! This type maintains a number of tricky invariants.
+//! It stores its length in one byte, but as an enum so that its representation
+//! has a niche that a surrounding `repr(Rust)` enum can wrap it without any
+//! size overhead.
 
-use crate::nonmaxu8::NonMaxU8;
-use crate::{num_words, Word};
+use crate::{nonmaxu8::NonMaxU8, num_words, Word};
 
 #[derive(Eq, PartialEq, Hash, Clone, Copy, Debug)]
 #[repr(C)]
@@ -30,11 +32,23 @@ impl DenseBitSet {
         }
     }
 
+    /// Returns the number of bits this can hold.
     #[inline]
     pub fn domain_size(&self) -> usize {
         self.domain_size.get() as usize
     }
 
+    /// Provides mutable access to the all used `Word`s.
+    ///
+    /// The intended use of this function is to implement set algorithms that
+    /// benefit from operating on multiple bits at once.
+    ///
+    /// This exposes the inner representation of `DenseBitSet` to safe code. To
+    /// ensure that the invariants of the type are not broken, this method
+    /// writes the previous value of `domain_size` after the provided
+    /// function returns. Note that this only ensures soundness, callers can
+    /// still mistakenly read through the `&mut [Word]` and find unexpected
+    /// bits.
     #[inline]
     pub fn words_mut<R, F: FnOnce(&mut [Word]) -> R>(&mut self, f: F) -> R {
         struct ResetGuard<'a> {
@@ -43,11 +57,6 @@ impl DenseBitSet {
         }
 
         impl<'a, 'b> ResetGuard<'a> {
-            fn new(set: &'a mut DenseBitSet) -> Self {
-                let original_size = set.domain_size;
-                Self { set, original_size }
-            }
-
             unsafe fn get(&'b mut self) -> &'b mut [u64] {
                 let size = num_words(self.original_size.get() as usize);
                 &mut self.set.as_words_mut()[..size]
@@ -60,10 +69,13 @@ impl DenseBitSet {
             }
         }
 
-        // SAFETY: We expose mutable access to the last byte in our tail, but as soon as `f`
-        // returns, we set it back to whatever it was previously.
+        // SAFETY: We expose mutable access to the last byte in our tail, but as soon as
+        // `f` returns, we set it back to whatever it was previously.
         unsafe {
-            let mut guard = ResetGuard::new(self);
+            let mut guard = ResetGuard {
+                original_size: self.domain_size,
+                set: self,
+            };
             f(guard.get())
         }
     }
@@ -82,26 +94,30 @@ impl DenseBitSet {
 
     #[inline]
     fn as_bytes(&self) -> &[u8; 31] {
-        // SAFETY: Reinterpreting u64 as u8 is valid, and our repr(C) ensures we have no padding.
+        // SAFETY: Reinterpreting u64 as u8 is valid, and our repr(C) ensures we have no
+        // padding.
         unsafe { &*(self as *const Self as *const [u8; 31]) }
     }
 
     #[inline]
     fn as_bytes_mut(&mut self) -> &mut [u8; 31] {
-        // SAFETY: Reinterpreting u64 as u8 is valid, and our repr(C) ensures we have no padding.
+        // SAFETY: Reinterpreting u64 as u8 is valid, and our repr(C) ensures we have no
+        // padding.
         unsafe { &mut *(self as *mut Self as *mut [u8; 31]) }
     }
 
     #[inline]
-    pub fn as_words(&self) -> &[u64; 4] {
-        // SAFETY: Reinterpreting u64 as u8 is valid, and our repr(C) ensures we have no padding.
-        // This also provides access to our NonMaxU8 as if it is part of a u64. This is also valid,
-        // and we don't provide mutation, so the niche is preserved.
+    fn as_words(&self) -> &[u64; 4] {
+        // SAFETY: Reinterpreting u64 as u8 is valid, and our repr(C) ensures we have no
+        // padding. This also provides access to our NonMaxU8 as if it is part
+        // of a u64. This is also valid, and we don't provide mutation, so the
+        // niche is preserved.
         unsafe { &*(self as *const Self as *const [u64; 4]) }
     }
 
-    /// SAFETY: Callers must ensure that if the last 8 bits are modified, that they are reset to a
-    /// nonzero value before `self` is accessed as a `DenseBitSet` again.
+    /// SAFETY: Callers must ensure that if the last 8 bits are modified, that
+    /// they are reset to a nonzero value before `self` is accessed as a
+    /// `DenseBitSet` again.
     #[inline]
     unsafe fn as_words_mut(&mut self) -> &mut [u64; 4] {
         unsafe { &mut *(self as *mut Self as *mut [u64; 4]) }
@@ -110,17 +126,14 @@ impl DenseBitSet {
     #[inline]
     pub fn union(&mut self, other: &Self) -> bool {
         assert_eq!(self.domain_size, other.domain_size);
-        // Since domain_size of self and other must be equal, we can just or all the bits, and the
-        // domain size bits will not be changed.
+        // Since domain_size of self and other must be equal, we can just or all the
+        // bits, and the domain size bits will not be changed.
         unsafe {
-            let this = self.as_words_mut();
-            let other = other.as_words();
-
             let mut changed = 0;
-            for i in 0..4 {
-                let old = this[i];
-                let new = old | other[i];
-                this[i] = new;
+            for (this, other) in self.as_words_mut().iter_mut().zip(other.as_words().iter()) {
+                let old = *this;
+                let new = old | *other;
+                *this = new;
                 changed |= old ^ new;
             }
             changed != 0
@@ -128,15 +141,32 @@ impl DenseBitSet {
     }
 
     #[inline]
-    pub fn iter(&self) -> impl Iterator<Item = Word> + '_ {
-        DenseBitSetIter {
+    pub fn intersect(&mut self, other: &Self) -> bool {
+        assert_eq!(self.domain_size, other.domain_size);
+        // Since domain_size of self and other must be equal, we can just or all the
+        // bits, and the domain size bits will not be changed.
+        unsafe {
+            let mut changed = 0;
+            for (this, other) in self.as_words_mut().iter_mut().zip(other.as_words().iter()) {
+                let old = *this;
+                let new = old & *other;
+                *this = new;
+                changed |= old ^ new;
+            }
+            changed != 0
+        }
+    }
+
+    #[inline]
+    pub fn words(&self) -> impl Iterator<Item = Word> + '_ {
+        DenseBitSetWordIter {
             state: 0,
             set: self,
         }
     }
 }
 
-pub struct DenseBitSetIter<'a> {
+pub struct DenseBitSetWordIter<'a> {
     state: u8,
     set: &'a DenseBitSet,
 }
@@ -144,7 +174,7 @@ pub struct DenseBitSetIter<'a> {
 const STATE_TAIL: u8 = 3;
 const STATE_DONE: u8 = 4;
 
-impl Iterator for DenseBitSetIter<'_> {
+impl Iterator for DenseBitSetWordIter<'_> {
     type Item = u64;
 
     #[inline]

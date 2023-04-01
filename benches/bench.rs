@@ -5,20 +5,14 @@ use criterion::{criterion_group, criterion_main, Criterion};
 
 type BitSet = bitset::BitSet<usize>;
 
-#[inline]
-fn iter_ones_using_contains<F: FnMut(usize)>(set: &BitSet, f: &mut F) {
-    for bit in 0..set.domain_size() {
-        if set.contains(bit) {
-            f(bit);
-        }
-    }
-}
+const LARGE: usize = 1_000_000;
+const SMALL: usize = 200;
 
-fn iter_ones_using_contains_all_zeros(c: &mut Criterion) {
+fn contains_all_zeros(c: &mut Criterion) {
     const N: usize = 1_000_000;
     let set = BitSet::new_empty(N);
 
-    c.bench_function("iter_ones/contains_all_zeros", |b| {
+    c.bench_function("contains_zeros_", |b| {
         b.iter(|| {
             let mut count = 0;
             iter_ones_using_contains(&set, &mut |_bit| count += 1);
@@ -27,10 +21,9 @@ fn iter_ones_using_contains_all_zeros(c: &mut Criterion) {
     });
 }
 
-fn iter_ones_using_contains_all_ones(c: &mut Criterion) {
+fn contains_all_ones(c: &mut Criterion) {
     const N: usize = 1_000_000;
     let set = BitSet::new_filled(N);
-    //set.insert_range(..);
 
     c.bench_function("iter_ones/contains_all_ones", |b| {
         b.iter(|| {

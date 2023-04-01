@@ -1,14 +1,18 @@
-#![warn(clippy::pedantic)]
-use std::fmt::Debug;
-use std::hash::Hash;
-use std::ops::Bound;
-use std::ops::RangeBounds;
+#![feature(new_uninit)]
 
+use std::{
+    fmt::Debug,
+    hash::Hash,
+    ops::{Bound, RangeBounds},
+};
+
+mod chunked;
 mod dense;
 mod fixed;
 mod iter;
 mod nonmaxu8;
 
+pub use chunked::ChunkedBitSet;
 pub use dense::*;
 pub use fixed::*;
 use iter::*;
@@ -16,6 +20,15 @@ use iter::*;
 pub trait Idx: Copy + 'static + Eq + PartialEq + Debug + Hash {
     fn new(_: usize) -> Self;
     fn index(&self) -> usize;
+    #[inline]
+    fn increment_by(&mut self, amount: usize) {
+        *self = self.plus(amount);
+    }
+
+    #[inline]
+    fn plus(self, amount: usize) -> Self {
+        Self::new(self.index() + amount)
+    }
 }
 
 impl Idx for usize {
@@ -120,4 +133,23 @@ fn byte_index_and_mask(index: usize) -> (usize, u8) {
 #[inline]
 fn max_bit(word: Word) -> usize {
     WORD_BITS - 1 - word.leading_zeros() as usize
+}
+
+#[inline]
+fn bitwise<Op>(out_vec: &mut [Word], in_vec: impl IntoIterator<Item = Word>, op: Op) -> bool
+where
+    Op: Fn(Word, Word) -> Word,
+{
+    let mut changed = 0;
+    for (out_elem, in_elem) in std::iter::zip(out_vec, in_vec) {
+        let old_val = *out_elem;
+        let new_val = op(old_val, in_elem);
+        *out_elem = new_val;
+        // This is essentially equivalent to a != with changed being a bool, but
+        // in practice this code gets auto-vectorized by the compiler for most
+        // operators. Using != here causes us to generate quite poor code as the
+        // compiler tries to go back to a boolean on each loop iteration.
+        changed |= old_val ^ new_val;
+    }
+    changed != 0
 }

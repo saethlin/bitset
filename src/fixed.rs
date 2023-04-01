@@ -1,11 +1,9 @@
-use std::fmt;
-use std::iter;
-use std::marker::PhantomData;
-use std::ops::RangeBounds;
+use std::{fmt, marker::PhantomData, ops::RangeBounds};
 
 use crate::{
-    bit_relations_inherent_impls, byte_index_and_mask, inclusive_start_end, max_bit, num_bytes,
-    num_words, word_index_and_mask, BitIter, BitRelations, DenseBitSet, Idx, Word, WORD_BITS,
+    bit_relations_inherent_impls, bitwise, byte_index_and_mask, inclusive_start_end, 
+    num_bytes, num_words, word_index_and_mask, BitIter, BitRelations, DenseBitSet, Idx, Word,
+    WORD_BITS,
 };
 /*
 use crate::{
@@ -15,7 +13,8 @@ use crate::{
 
 /// A fixed-size bitset type with a dense representation.
 ///
-/// NOTE: Use [`GrowableBitSet`] if you need support for resizing after creation.
+/// NOTE: Use [`GrowableBitSet`] if you need support for resizing after
+/// creation.
 ///
 /// `T` is an index type, typically a newtyped `usize` wrapper, but it can also
 /// just be `usize`.
@@ -23,7 +22,6 @@ use crate::{
 /// All operations that involve an element will panic if the element is equal
 /// to or greater than the domain size. All operations that involve two bitsets
 /// will panic if the bitsets have differing domain sizes.
-///
 #[derive(Eq, PartialEq, Hash)]
 pub struct BitSet<T> {
     inner: BitSetImpl,
@@ -167,9 +165,8 @@ impl<T: Idx> BitSet<T> {
         let (index, mask) = byte_index_and_mask(elem.index());
         let (words, domain_size) = self.raw_parts();
         assert!(elem.index() < domain_size);
-        unsafe {
-            (words.get_unchecked(index) & mask) != 0
-        }
+        debug_assert!(index < words.len());
+        unsafe { (words.get_unchecked(index) & mask) != 0 }
     }
 
     /*
@@ -184,13 +181,11 @@ impl<T: Idx> BitSet<T> {
     }
     */
 
-    /*
     /// Is the set empty?
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.words().iter().all(|a| *a == 0)
+        self.iter().next().is_none()
     }
-    */
 
     /// Insert `elem`. Returns whether the set has changed.
     #[inline(never)]
@@ -199,7 +194,8 @@ impl<T: Idx> BitSet<T> {
         let (words, domain_size) = self.raw_parts_mut();
         assert!(bit < domain_size);
         let (index, mask) = byte_index_and_mask(bit);
-        let word_ref = &mut words[index];
+        debug_assert!(index < words.len());
+        let word_ref = unsafe { words.get_unchecked_mut(index) };
         let word = *word_ref;
         let new_word = word | mask;
         *word_ref = new_word;
@@ -259,38 +255,18 @@ impl<T: Idx> BitSet<T> {
     /// Iterates over the indices of set bits in a sorted order.
     #[inline]
     pub fn iter(&self) -> impl Iterator<Item = T> + '_ {
-        enum EitherIter<L, R> {
-            Left(L),
-            Right(R),
-        }
+        BitIter::new(self.words())
+    }
 
-        impl<L, R> Iterator for EitherIter<L, R>
-        where
-            L: Iterator<Item = Word>,
-            R: Iterator<Item = Word>,
-        {
-            type Item = Word;
-            fn next(&mut self) -> Option<Self::Item> {
-                match self {
-                    EitherIter::Left(l) => l.next(),
-                    EitherIter::Right(r) => r.next(),
-                }
-            }
-        }
-
-        let it = match &self.inner {
-            BitSetImpl::Inline(inline) => EitherIter::Left(inline.iter()),
+    #[inline]
+    pub fn words(&self) -> impl Iterator<Item = Word> + '_ {
+        match &self.inner {
+            BitSetImpl::Inline(inline) => EitherIter::Left(inline.words()),
             BitSetImpl::Heap { words, .. } => EitherIter::Right(words.iter().cloned()),
-        };
-        BitIter::new(it)
+        }
     }
 
     /*
-    pub fn to_hybrid(&self) -> HybridBitSet<T> {
-        // Note: we currently don't bother trying to make a Sparse set.
-        HybridBitSet::Dense(self.to_owned())
-    }
-
     /// Set `self = self | other`. In contrast to `union` returns `true` if the set contains at
     /// least one bit that is not in `other` (i.e. `other` is not a superset of `self`).
     ///
@@ -386,44 +362,57 @@ impl<T: Idx> BitRelations<BitSet<T>> for BitSet<T> {
                 },
             ) => {
                 assert_eq!(s_domain_size, o_domain_size);
-                bitwise(&mut s[..], &o[..], |a, b| a | b)
+                bitwise(&mut s[..], o.iter().copied(), |a, b| a | b)
             }
             _ => unreachable!(),
         }
     }
 
     fn subtract(&mut self, other: &BitSet<T>) -> bool {
-        assert_eq!(self.domain_size(), other.domain_size());
-        todo!()
-        //self.words_mut(|words| bitwise(words, other.words(), |a, b| a & !b))
+        match (&mut self.inner, &other.inner) {
+            (BitSetImpl::Inline(s), BitSetImpl::Inline(o)) => {
+                assert_eq!(s.domain_size(), o.domain_size());
+                s.words_mut(|words| bitwise(words, o.words(), |a, b| a & !b))
+            }
+            (
+                BitSetImpl::Heap {
+                    words: s,
+                    domain_size: s_domain_size,
+                },
+                BitSetImpl::Heap {
+                    words: o,
+                    domain_size: o_domain_size,
+                },
+            ) => {
+                assert_eq!(s_domain_size, o_domain_size);
+                bitwise(&mut s[..], o.iter().copied(), |a, b| a & !b)
+            }
+            _ => unreachable!(),
+        }
     }
 
-    // TODO: The same trick that union is using applies here
     fn intersect(&mut self, other: &BitSet<T>) -> bool {
-        assert_eq!(self.domain_size(), other.domain_size());
-        todo!()
-        //self.words_mut(|words| bitwise(words, other.words(), |a, b| a & b))
+        match (&mut self.inner, &other.inner) {
+            (BitSetImpl::Inline(s), BitSetImpl::Inline(o)) => {
+                assert_eq!(s.domain_size(), o.domain_size());
+                s.intersect(o)
+            }
+            (
+                BitSetImpl::Heap {
+                    words: s,
+                    domain_size: s_domain_size,
+                },
+                BitSetImpl::Heap {
+                    words: o,
+                    domain_size: o_domain_size,
+                },
+            ) => {
+                assert_eq!(s_domain_size, o_domain_size);
+                bitwise(&mut s[..], o.iter().copied(), |a, b| a & b)
+            }
+            _ => unreachable!(),
+        }
     }
-}
-
-#[inline]
-fn bitwise<Op>(out_vec: &mut [Word], in_vec: &[Word], op: Op) -> bool
-where
-    Op: Fn(Word, Word) -> Word,
-{
-    assert_eq!(out_vec.len(), in_vec.len());
-    let mut changed = 0;
-    for (out_elem, in_elem) in iter::zip(out_vec, in_vec) {
-        let old_val = *out_elem;
-        let new_val = op(old_val, *in_elem);
-        *out_elem = new_val;
-        // This is essentially equivalent to a != with changed being a bool, but
-        // in practice this code gets auto-vectorized by the compiler for most
-        // operators. Using != here causes us to generate quite poor code as the
-        // compiler tries to go back to a boolean on each loop iteration.
-        changed |= old_val ^ new_val;
-    }
-    changed != 0
 }
 
 /*
@@ -519,6 +508,25 @@ impl<T: Idx> BitRelations<ChunkedBitSet<T>> for BitSet<T> {
     }
 }
 */
+
+enum EitherIter<L, R> {
+    Left(L),
+    Right(R),
+}
+
+impl<L, R> Iterator for EitherIter<L, R>
+where
+    L: Iterator<Item = Word>,
+    R: Iterator<Item = Word>,
+{
+    type Item = Word;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            EitherIter::Left(l) => l.next(),
+            EitherIter::Right(r) => r.next(),
+        }
+    }
+}
 
 #[cfg(test)]
 mod dense_tests {
