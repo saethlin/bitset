@@ -9,12 +9,13 @@ use std::{
 mod chunked;
 mod dense;
 mod fixed;
+mod growable;
 mod iter;
 mod nonmaxu8;
 
 pub use chunked::ChunkedBitSet;
-pub use dense::*;
-pub use fixed::*;
+pub use fixed::BitSet;
+pub use growable::GrowableBitSet;
 use iter::*;
 
 pub trait Idx: Copy + 'static + Eq + PartialEq + Debug + Hash {
@@ -117,7 +118,8 @@ fn num_bytes(domain_size: usize) -> usize {
 }
 
 #[inline]
-fn word_index_and_mask(index: usize) -> (usize, Word) {
+fn word_index_and_mask<T: Idx>(index: T) -> (usize, Word) {
+    let index = index.index();
     let word_index = index / WORD_BITS;
     let mask = 1 << (index % WORD_BITS);
     (word_index, mask)

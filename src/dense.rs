@@ -1,6 +1,6 @@
-//! The inline representation of a small-size-optimized bitset.
+//! This module provides encapsulation for the unsafe bits of the inline mode of
+//! `BitSet`, but not the implementation.
 //!
-//! This type maintains a number of tricky invariants.
 //! It stores its length in one byte, but as an enum so that its representation
 //! has a niche that a surrounding `repr(Rust)` enum can wrap it without any
 //! size overhead.
@@ -28,7 +28,7 @@ impl DenseBitSet {
         Self {
             words: [0; 3],
             tail: [0; 7],
-            domain_size: NonMaxU8::new(domain_size as u8).unwrap(),
+            domain_size: NonMaxU8::new(domain_size).unwrap(),
         }
     }
 
@@ -36,6 +36,15 @@ impl DenseBitSet {
     #[inline]
     pub fn domain_size(&self) -> usize {
         self.domain_size.get() as usize
+    }
+
+    #[inline]
+    pub fn ensure(&mut self, min_domain_size: usize) -> Result<(), ()> {
+        let Some(new_domain_size) = NonMaxU8::new(min_domain_size) else {
+            return Err(());
+        };
+        self.domain_size = self.domain_size.max(new_domain_size);
+        Ok(())
     }
 
     /// Provides mutable access to the all used `Word`s.

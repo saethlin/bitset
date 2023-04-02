@@ -1,6 +1,6 @@
 use std::fmt::{self, Debug};
 
-#[derive(Eq, PartialEq, Hash, Clone, Copy)]
+#[derive(Eq, PartialEq, Hash, Clone, Copy, PartialOrd, Ord)]
 pub struct NonMaxU8 {
     repr: NonMaxU8Repr,
 }
@@ -17,11 +17,11 @@ impl NonMaxU8 {
     };
 
     #[inline]
-    pub fn new(n: u8) -> Option<Self> {
-        if n > Self::MAX.get() {
+    pub fn new(n: usize) -> Option<Self> {
+        if n > Self::MAX.get() as usize {
             None
         } else {
-            let repr = unsafe { std::mem::transmute(n) };
+            let repr = unsafe { std::mem::transmute(n as u8) };
             Some(Self { repr })
         }
     }
@@ -44,7 +44,7 @@ macro_rules! const_assert {
 
 const_assert!(std::mem::size_of::<Option<NonMaxU8>>() == 1);
 
-#[derive(Eq, PartialEq, Hash, Clone, Copy)]
+#[derive(Eq, PartialEq, Hash, Clone, Copy, PartialOrd, Ord)]
 enum NonMaxU8Repr {
     _0 = 0,
     _1 = 1,

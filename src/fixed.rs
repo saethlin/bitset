@@ -1,9 +1,9 @@
 use std::{fmt, marker::PhantomData, ops::RangeBounds};
 
 use crate::{
-    bit_relations_inherent_impls, bitwise, byte_index_and_mask, inclusive_start_end, 
-    num_bytes, num_words, word_index_and_mask, BitIter, BitRelations, DenseBitSet, Idx, Word,
-    WORD_BITS,
+    bit_relations_inherent_impls, bitwise, byte_index_and_mask, dense::DenseBitSet,
+    inclusive_start_end, num_bytes, num_words, word_index_and_mask, BitIter, BitRelations, Idx,
+    Word, WORD_BITS,
 };
 /*
 use crate::{
@@ -24,12 +24,12 @@ use crate::{
 /// will panic if the bitsets have differing domain sizes.
 #[derive(Eq, PartialEq, Hash)]
 pub struct BitSet<T> {
-    inner: BitSetImpl,
-    marker: PhantomData<T>,
+    pub(crate) inner: BitSetImpl,
+    pub(crate) marker: PhantomData<T>,
 }
 
 #[derive(Eq, PartialEq, Hash, Clone, Debug)]
-enum BitSetImpl {
+pub(crate) enum BitSetImpl {
     Inline(DenseBitSet),
     Heap {
         domain_size: usize,
@@ -104,7 +104,7 @@ impl<T: Idx> BitSet<T> {
     }
 
     #[inline]
-    fn raw_parts(&self) -> (&[u8], usize) {
+    pub(crate) fn raw_parts(&self) -> (&[u8], usize) {
         match &self.inner {
             BitSetImpl::Inline(inline) => inline.raw_parts(),
             BitSetImpl::Heap { domain_size, words } => {
