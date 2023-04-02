@@ -1,6 +1,4 @@
-use crate::{
-    byte_index_and_mask, fixed::BitSetImpl, num_words, word_index_and_mask, BitIter, BitSet, Idx,
-};
+use crate::{byte_index_and_mask, fixed::BitSetImpl, num_words, BitSet, Idx};
 use std::{iter, marker::PhantomData};
 
 /// A resizable bitset type with a dense representation.
@@ -24,23 +22,23 @@ impl<T: Idx> Default for GrowableBitSet<T> {
 impl<T: Idx> GrowableBitSet<T> {
     /// Ensure that the set can hold at least `min_domain_size` elements.
     pub fn ensure(&mut self, min_domain_size: usize) {
-        let (domain_size, current_len) = match &self.bit_set.inner {
+        let current_domain_size = match &mut self.bit_set.inner {
             BitSetImpl::Inline(inline) => {
                 if inline.ensure(min_domain_size).is_ok() {
                     return;
                 } else {
-                    (inline.domain_size(), 4)
+                    inline.domain_size()
                 }
             }
-            BitSetImpl::Heap { domain_size, words } => {
+            BitSetImpl::Heap { domain_size, .. } => {
                 if *domain_size >= min_domain_size {
                     return;
                 }
-                (*domain_size, words.len())
+                *domain_size
             }
         };
         // We need to do a heap resize. :'(
-        let new_words = num_words(min_domain_size) - current_len;
+        let new_words = num_words(min_domain_size) - num_words(current_domain_size);
         let words = self
             .bit_set
             .words()
@@ -89,7 +87,7 @@ impl<T: Idx> GrowableBitSet<T> {
     #[inline]
     pub fn contains(&self, elem: T) -> bool {
         let (word_index, mask) = byte_index_and_mask(elem.index());
-        let (words, domain_size) = self.bit_set.raw_parts();
+        let (words, _domain_size) = self.bit_set.raw_parts();
         words
             .get(word_index)
             .map_or(false, |word| (word & mask) != 0)

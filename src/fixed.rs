@@ -2,8 +2,8 @@ use std::{fmt, marker::PhantomData, ops::RangeBounds};
 
 use crate::{
     bit_relations_inherent_impls, bitwise, byte_index_and_mask, dense::DenseBitSet,
-    inclusive_start_end, num_bytes, num_words, word_index_and_mask, BitIter, BitRelations, Idx,
-    Word, WORD_BITS,
+    inclusive_start_end, num_bytes, num_words, word_index_and_mask, BitIter, BitRelations,
+    EitherIter, Idx, Word, WORD_BITS
 };
 /*
 use crate::{
@@ -169,17 +169,14 @@ impl<T: Idx> BitSet<T> {
         unsafe { (words.get_unchecked(index) & mask) != 0 }
     }
 
-    /*
     /// Is `self` is a (non-strict) superset of `other`?
     #[inline]
     pub fn superset(&self, other: &BitSet<T>) -> bool {
         assert_eq!(self.domain_size(), other.domain_size());
         self.words()
-            .iter()
             .zip(other.words())
-            .all(|(a, b)| (a & b) == *b)
+            .all(|(a, b)| (a & b) == b)
     }
-    */
 
     /// Is the set empty?
     #[inline]
@@ -307,15 +304,23 @@ impl<T: Idx> BitSet<T> {
     }
     */
 
-    /*
+    // FIXME: This is an iterating algorithm, but I'm implementing this with byte access right now
+    // instead of word access.
     pub fn last_set_in(&self, range: impl RangeBounds<T>) -> Option<T> {
-        let (start, end) = inclusive_start_end(range, self.domain_size())?;
-        let (start_word_index, _) = word_index_and_mask(start);
-        let (end_word_index, end_mask) = word_index_and_mask(end);
 
-        let end_word = self.words()[end_word_index] & (end_mask | (end_mask - 1));
+        #[inline]
+        fn max_bit(word: u8) -> usize {
+            8 - 1 - word.leading_zeros() as usize
+        }
+
+        let (words, domain_size) = self.raw_parts();
+        let (start, end) = inclusive_start_end(range, domain_size)?;
+        let (start_word_index, _) = byte_index_and_mask(start);
+        let (end_word_index, end_mask) = byte_index_and_mask(end);
+
+        let end_word = words[end_word_index] & (end_mask | (end_mask - 1));
         if end_word != 0 {
-            let pos = max_bit(end_word) + WORD_BITS * end_word_index;
+            let pos = max_bit(end_word) + 8 * end_word_index;
             if start <= pos {
                 return Some(T::new(pos));
             }
@@ -324,13 +329,13 @@ impl<T: Idx> BitSet<T> {
         // We exclude end_word_index from the range here, because we don't want
         // to limit ourselves to *just* the last word: the bits set it in may be
         // after `end`, so it may not work out.
-        if let Some(offset) = self.words()[start_word_index..end_word_index]
+        if let Some(offset) = words[start_word_index..end_word_index]
             .iter()
             .rposition(|&w| w != 0)
         {
             let word_idx = start_word_index + offset;
-            let start_word = self.words()[word_idx];
-            let pos = max_bit(start_word) + WORD_BITS * word_idx;
+            let start_word = words[word_idx];
+            let pos = max_bit(start_word) + 8 * word_idx;
             if start <= pos {
                 return Some(T::new(pos));
             }
@@ -338,7 +343,6 @@ impl<T: Idx> BitSet<T> {
 
         None
     }
-    */
 
     bit_relations_inherent_impls! {}
 }
@@ -509,24 +513,7 @@ impl<T: Idx> BitRelations<ChunkedBitSet<T>> for BitSet<T> {
 }
 */
 
-enum EitherIter<L, R> {
-    Left(L),
-    Right(R),
-}
 
-impl<L, R> Iterator for EitherIter<L, R>
-where
-    L: Iterator<Item = Word>,
-    R: Iterator<Item = Word>,
-{
-    type Item = Word;
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            EitherIter::Left(l) => l.next(),
-            EitherIter::Right(r) => r.next(),
-        }
-    }
-}
 
 #[cfg(test)]
 mod dense_tests {
@@ -549,7 +536,7 @@ mod dense_tests {
         for size in 0..300 {
             let mut set = BitSet::new_empty(size);
             assert_eq!(size, set.domain_size());
-            //assert!(set.is_empty());
+            assert!(set.is_empty());
             for bit in 0..size {
                 set.insert(bit);
                 assert!(set.contains(bit));

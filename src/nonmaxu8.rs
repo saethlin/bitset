@@ -303,16 +303,16 @@ mod tests {
 
     #[test]
     fn all() {
-        for i in 0..=NonMaxU8::MAX.get() {
+        for i in 0..=(NonMaxU8::MAX.get() as usize) {
             let nm = NonMaxU8::new(i).unwrap();
-            assert_eq!(i, nm.get());
+            assert_eq!(i, nm.get() as usize);
             assert_eq!(format!("{:?}", i), format!("{:?}", nm));
         }
     }
 
     #[test]
     fn niche_rejected() {
-        for i in NonMaxU8::MAX.get() + 1..=u8::MAX {
+        for i in (NonMaxU8::MAX.get() as usize + 1)..=(u8::MAX as usize) {
             assert_eq!(NonMaxU8::new(i), None);
         }
     }

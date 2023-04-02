@@ -23,3 +23,7 @@ debug = 1
 
 [profile.bench]
 debug = 1
+
+[dependencies]
+arrayvec = "0.7.2"
+smallvec = "1.10.0"

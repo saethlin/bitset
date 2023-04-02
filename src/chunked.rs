@@ -1,6 +1,6 @@
 use crate::{
     bit_relations_inherent_impls, bitwise, num_words, word_index_and_mask, BitIter, BitRelations,
-    Idx, Word, WORD_BITS,
+    Idx, Word, WORD_BITS, clear_excess_bits_in_final_word
 };
 use std::{marker::PhantomData, rc::Rc};
 
@@ -575,6 +575,7 @@ impl Chunk {
     }
 }
 
+/*
 // Applies a function to mutate a bitset, and returns true if any
 // of the applications return true
 fn sequential_update<T: Idx>(
@@ -583,6 +584,7 @@ fn sequential_update<T: Idx>(
 ) -> bool {
     it.fold(false, |changed, elem| self_update(elem) | changed)
 }
+*/
 
 /*
 // Optimization of intersection for SparseBitSet that's generic
@@ -627,3 +629,21 @@ fn chunk_word_index_and_mask<T: Idx>(elem: T) -> (usize, Word) {
     let chunk_elem = elem.index() % CHUNK_BITS;
     word_index_and_mask(chunk_elem)
 }
+
+/// Does this bitwise operation change `out_vec`?
+#[inline]
+fn bitwise_changes<Op>(out_vec: &[Word], in_vec: &[Word], op: Op) -> bool
+where
+    Op: Fn(Word, Word) -> Word,
+{
+    assert_eq!(out_vec.len(), in_vec.len());
+    for (out_elem, in_elem) in std::iter::zip(out_vec, in_vec) {
+        let old_val = *out_elem;
+        let new_val = op(old_val, *in_elem);
+        if old_val != new_val {
+            return true;
+        }
+    }
+    false
+}
+

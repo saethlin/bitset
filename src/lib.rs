@@ -8,15 +8,24 @@ use std::{
 
 mod chunked;
 mod dense;
+mod finite;
 mod fixed;
 mod growable;
+mod hybrid;
 mod iter;
 mod nonmaxu8;
+mod sparse;
+//mod matrix;
+//mod sparse_matrix;
 
 pub use chunked::ChunkedBitSet;
+pub use finite::FiniteBitSet;
 pub use fixed::BitSet;
 pub use growable::GrowableBitSet;
+pub use hybrid::HybridBitSet;
 use iter::*;
+//pub use matrix::BitMatrix;
+//pub use sparse_matrix::SparseBitMatrix;
 
 pub trait Idx: Copy + 'static + Eq + PartialEq + Debug + Hash {
     fn new(_: usize) -> Self;
@@ -132,9 +141,20 @@ fn byte_index_and_mask(index: usize) -> (usize, u8) {
     (word_index, mask)
 }
 
+/*
 #[inline]
 fn max_bit(word: Word) -> usize {
     WORD_BITS - 1 - word.leading_zeros() as usize
+}
+*/
+
+#[inline]
+fn clear_excess_bits_in_final_word(domain_size: usize, words: &mut [Word]) {
+    let num_bits_in_final_word = domain_size % WORD_BITS;
+    if num_bits_in_final_word > 0 {
+        let mask = (1 << num_bits_in_final_word) - 1;
+        words[words.len() - 1] &= mask;
+    }
 }
 
 #[inline]
@@ -154,4 +174,25 @@ where
         changed |= old_val ^ new_val;
     }
     changed != 0
+}
+
+enum EitherIter<L, R> {
+    Left(L),
+    Right(R),
+}
+
+impl<L, R, T> Iterator for EitherIter<L, R>
+where
+    L: Iterator<Item = T>,
+    R: Iterator<Item = T>,
+{
+    type Item = T;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            EitherIter::Left(l) => l.next(),
+            EitherIter::Right(r) => r.next(),
+        }
+    }
 }
